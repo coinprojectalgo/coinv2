@@ -145,6 +145,7 @@ def interactive_parameters() -> dict:
         "max_ticks": max_ticks,
         "animate": False,
         "interval_ms": 60,
+        "parallel_actions": True,
     }
 
 
@@ -217,6 +218,7 @@ def main() -> None:
             "max_ticks": args.max_ticks,
             "animate": False,
             "interval_ms": 60,
+            "parallel_actions": True,
         }
 
         # If user omitted key parameters, switch to interactive mode.

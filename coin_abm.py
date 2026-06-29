@@ -86,6 +86,7 @@ class CoinModel:
         max_ticks: int = 5000,
         seed: Optional[int] = 1,
         latent_rule: str = "formal",  # formal = anger>fear and anger>threshold
+        parallel_actions: bool = True,
     ) -> None:
         if grid_size is not None:
             grid_width = grid_size
@@ -109,6 +110,7 @@ class CoinModel:
 
         self.max_ticks = int(max_ticks)
         self.latent_rule = latent_rule
+        self.parallel_actions = bool(parallel_actions)
 
         self.rng = random.Random(seed)
         self.np_rng = np.random.default_rng(seed)
@@ -438,6 +440,18 @@ class CoinModel:
             provoked=False,
         )
 
+    def _insurgent_action(self, insurgent: Civilian) -> None:
+        if self.rng.random() < self.p_ir:
+            self._perform_insurgent_recruit(insurgent)
+        else:
+            self._perform_insurgent_attack(insurgent)
+
+    def _soldier_action(self, soldier: Soldier) -> None:
+        if self.rng.random() < self.p_gr:
+            self._perform_soldier_recruit(soldier)
+        else:
+            self._perform_soldier_attack(soldier)
+
     # Tick loop / history
  
 
@@ -462,25 +476,32 @@ class CoinModel:
     def step(self) -> bool:
         """
         One tick:
-        1) random insurgent acts (recruit or attack)
-        2) random soldier acts (recruit or attack)
+        1) recompute civilian states
+        2) either one insurgent / one soldier act (legacy mode) or all eligible agents act (parallel mode)
         3) states are re-evaluated
         """
         self._reset_tick_flags()
+        self.recompute_states()
 
-        insurgent = self._choose_random_insurgent()
-        if insurgent is not None:
-            if self.rng.random() < self.p_ir:
-                self._perform_insurgent_recruit(insurgent)
-            else:
-                self._perform_insurgent_attack(insurgent)
+        if self.parallel_actions:
+            insurgents = self._all_insurgents()
+            self.rng.shuffle(insurgents)
+            for insurgent in insurgents:
+                if insurgent.id in self.civilians and self.civilians[insurgent.id] is insurgent:
+                    self._insurgent_action(insurgent)
 
-        soldier = self._choose_random_soldier()
-        if soldier is not None:
-            if self.rng.random() < self.p_gr:
-                self._perform_soldier_recruit(soldier)
-            else:
-                self._perform_soldier_attack(soldier)
+            soldiers = list(self.soldiers.values())
+            self.rng.shuffle(soldiers)
+            for soldier in soldiers:
+                self._soldier_action(soldier)
+        else:
+            insurgent = self._choose_random_insurgent()
+            if insurgent is not None:
+                self._insurgent_action(insurgent)
+
+            soldier = self._choose_random_soldier()
+            if soldier is not None:
+                self._soldier_action(soldier)
 
         self.recompute_states()
         self.tick_count += 1
@@ -682,6 +703,7 @@ def run_one_simulation(
     latent_rule: str = "formal",
     animate: bool = False,
     interval_ms: int = 60,
+    parallel_actions: bool = True,
 ) -> CoinModel:
     model = CoinModel(
         grid_width=grid_width,
@@ -701,6 +723,7 @@ def run_one_simulation(
         seed=seed,
         max_ticks=max_ticks,
         latent_rule=latent_rule,
+        parallel_actions=parallel_actions,
     )
     if animate:
         anim = model.animate(interval_ms=interval_ms)
@@ -777,6 +800,7 @@ def plot_duration_surface(
     seed: int = 1,
     max_ticks: int = 5000,
     n_replicates: int = 1,
+    parallel_actions: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     acc = np.array(list(accuracy_values), dtype=float)
     eff = np.array(list(effectiveness_values), dtype=float)
@@ -799,6 +823,7 @@ def plot_duration_surface(
                     insurgent_anger_delta=insurgent_anger_delta,
                     seed=seed + r,
                     max_ticks=max_ticks,
+                    parallel_actions=parallel_actions,
                 )
                 model.run()
                 durations.append(model.tick_count)
@@ -838,7 +863,7 @@ def save_duration_surface_figure(
     plt.close(fig)
 
 
-def run_paper_experiments(output_dir: str | Path = "results", seed: int = 1) -> None:
+def run_paper_experiments(output_dir: str | Path = "results", seed: int = 1, parallel_actions: bool = True) -> None:
     """
     Generate the nine paper-style scenarios:
     - Fig3 A/B/C: effectiveness=0.2, accuracy=0.2
@@ -876,6 +901,7 @@ def run_paper_experiments(output_dir: str | Path = "results", seed: int = 1) -> 
             insurgent_anger_delta=i_delta,
             seed=seed,
             max_ticks=5000,
+            parallel_actions=parallel_actions,
         )
         model.run()
         save_individual_figures(model, run_dir)
